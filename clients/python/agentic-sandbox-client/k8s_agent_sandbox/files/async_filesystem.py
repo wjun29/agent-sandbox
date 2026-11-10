@@ -40,6 +40,7 @@ from k8s_agent_sandbox.files.filesystem import (
 )
 from k8s_agent_sandbox.models import FileEntry, SandboxFileConfig
 from k8s_agent_sandbox.trace_manager import async_trace_span, trace
+from k8s_agent_sandbox.utils import ClosableClient
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ async def _iter_binary_chunks(content: BinaryIO) -> AsyncIterator[bytes]:
         yield chunk
 
 
-class AsyncFilesystem:
+class AsyncFilesystem(ClosableClient):
     """Read and modify sandbox files without blocking the event loop."""
 
     def __init__(
@@ -118,6 +119,7 @@ class AsyncFilesystem:
         sent once without retries. The caller must close the file object; its
         position may advance if the upload fails.
         """
+        self._ensure_open()
         if isinstance(content, str):
             content = content.encode("utf-8")
         elif isinstance(content, (bytearray, memoryview)):
@@ -188,6 +190,7 @@ class AsyncFilesystem:
         exceeding it raises ``SandboxResponseTooLargeError`` without returning
         partial content. Downloads remain unlimited when it is unset.
         """
+        self._ensure_open()
         if self._file_config.max_download_size is not None:
             with io.BytesIO() as destination:
                 await self._read_to(
@@ -232,6 +235,7 @@ class AsyncFilesystem:
         written before an error or cancellation remains in the destination.
         The returned value is the number of bytes written.
         """
+        self._ensure_open()
         return await self._read_to(path, destination, timeout, allow_unsafe_paths, max_bytes)
 
     async def _read_to(
@@ -295,6 +299,7 @@ class AsyncFilesystem:
     @async_trace_span("list")
     async def list(self, path: str, timeout: int = 60) -> list[FileEntry]:
         """List files and directories at a sandbox-relative path."""
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", path)
@@ -356,6 +361,7 @@ class AsyncFilesystem:
     @async_trace_span("exists")
     async def exists(self, path: str, timeout: int = 60) -> bool:
         """Return whether a path exists without downloading its contents."""
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", path)
@@ -407,6 +413,7 @@ class AsyncFilesystem:
         The legacy runtime has no delete endpoint and raises
         ``NotImplementedError``.
         """
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", path)
@@ -425,6 +432,7 @@ class AsyncFilesystem:
         Succeeds if the directory already exists. The legacy runtime raises
         ``NotImplementedError``.
         """
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", path)
@@ -437,6 +445,7 @@ class AsyncFilesystem:
         self, source: str, destination: str, overwrite: bool = False, timeout: int = 60
     ) -> None:
         """Rename a sandboxd file or directory. See ``Filesystem.move``."""
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", source)
@@ -450,6 +459,7 @@ class AsyncFilesystem:
         self, source: str, destination: str, overwrite: bool = False, timeout: int = 60
     ) -> None:
         """Copy a sandboxd file or directory. See ``Filesystem.move``."""
+        self._ensure_open()
         span = trace.get_current_span()
         if span.is_recording():
             span.set_attribute("sandbox.file.path", source)
